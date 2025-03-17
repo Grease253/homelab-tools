@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# Configuration
+LOG_FILE="/home/pie5/logs/internet_downtime.log"
+PING_HOST="8.8.8.8"
+PING_INTERVAL=60
+SERVICE_NAME="internet_monitor"
+PID_FILE="/var/run/$SERVICE_NAME.pid"
+
+# Variables
+CONNECTED=true
+DISCONNECT_TIME=""
+
+# Function to log messages
+log_message() {
+    TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
+    echo "$TIMESTAMP: $1" >> "$LOG_FILE"
+    echo "$TIMESTAMP: $1"
+}
+
+# Function to check internet connectivity
+check_connection() {
+    if ping -c 1 -W 5 "$PING_HOST" > /dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Start the service
+start() {
+    if [ -f "$PID_FILE" ]; then
+        echo "$SERVICE_NAME is already running."
+        return 1
+    fi
+
+    echo "Starting $SERVICE_NAME..."
+    (
+        while true; do
+            if check_connection; then
+                if [ "$CONNECTED" = false ]; then
+                    CONNECTED=true
+                    RECONNECT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+                    DURATION=$(date -d "$RECONNECT_TIME" -d "$DISCONNECT_TIME" +%H:%M)
+                    log_message "Internet reconnected. Downtime: $DURATION"
+                fi
+            else
+                if [ "$CONNECTED" = true ]; then
+                    CONNECTED=false
+                    DISCONNECT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+                    log_message "Internet disconnected."
+                fi
+            fi
+            sleep "$PING_INTERVAL"
+        done
+    ) &
+    PID=$! # Capture the PID of the background process
+    echo "$PID" > "$PID_FILE"
+    echo "$SERVICE_NAME started."
+    wait "$PID" # Wait for the background process to finish
+}
+
+
+# Stop the service
+stop() {
+    if [ ! -f "$PID_FILE" ]; then
+        echo "$SERVICE_NAME is not running."
+        return 1
+    fi
+
+    PID=$(cat "$PID_FILE")
+    echo "Stopping $SERVICE_NAME..."
+    kill "$PID"
+    rm "$PID_FILE"
+    echo "$SERVICE_NAME stopped."
+}
+
+# Restart the service
+restart() {
+    stop
+    start
+}
+
+# Status of the service
+status() {
+    if [ -f "$PID_FILE" ]; then
+        echo "$SERVICE_NAME is running."
+    else
+        echo "$SERVICE_NAME is stopped."
+    fi
+}
+
+# Main control
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    status)
+        status
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
